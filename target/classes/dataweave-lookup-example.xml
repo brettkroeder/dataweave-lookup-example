@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:tracking="http://www.mulesoft.org/schema/mule/ee/tracking" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:apikit="http://www.mulesoft.org/schema/mule/apikit" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:dw="http://www.mulesoft.org/schema/mule/ee/dw" xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns:metadata="http://www.mulesoft.org/schema/mule/metadata" xmlns:objectstore="http://www.mulesoft.org/schema/mule/objectstore" xmlns:scripting="http://www.mulesoft.org/schema/mule/scripting" xmlns:spring="http://www.springframework.org/schema/beans" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/apikit http://www.mulesoft.org/schema/mule/apikit/current/mule-apikit.xsd
+http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-3.1.xsd
+http://www.mulesoft.org/schema/mule/scripting http://www.mulesoft.org/schema/mule/scripting/current/mule-scripting.xsd
+http://www.mulesoft.org/schema/mule/objectstore http://www.mulesoft.org/schema/mule/objectstore/current/mule-objectstore.xsd
+http://www.mulesoft.org/schema/mule/ee/dw http://www.mulesoft.org/schema/mule/ee/dw/current/dw.xsd
+http://www.mulesoft.org/schema/mule/ee/tracking http://www.mulesoft.org/schema/mule/ee/tracking/current/mule-tracking-ee.xsd">
+    <http:listener-config name="objectStore-api-httpListenerConfig" host="0.0.0.0" port="8081" doc:name="HTTP Listener Configuration" />
+    <apikit:config name="objectStore-api-config" raml="objectStore-api.raml" consoleEnabled="false" doc:name="Router" />
+    <objectstore:config name="ObjectStore__Connector" doc:name="ObjectStore: Connector" partition="#[flowVars.partitionName]" />
+    <flow name="objectStore-api-main">
+        <http:listener config-ref="objectStore-api-httpListenerConfig" path="/api/*" doc:name="HTTP" />
+        <apikit:router config-ref="objectStore-api-config" doc:name="APIkit Router" />
+        <exception-strategy ref="objectStore-api-apiKitGlobalExceptionMapping" doc:name="Reference Exception Strategy" />
+    </flow>
+    <flow name="objectStore-api-console">
+        <http:listener config-ref="objectStore-api-httpListenerConfig" path="/console/*" doc:name="HTTP" />
+        <apikit:console config-ref="objectStore-api-config" doc:name="APIkit Console" />
+    </flow>
+    <flow name="get:/objectStore/test:objectStore-api-config">
+        <dw:transform-message metadata:id="16e654be-91e4-44a6-be39-c342fbf076dc" doc:name="Transform Message">
+            <dw:set-payload><![CDATA[%dw 1.0
+%output application/json
+---
+{
+	stateCode: inboundProperties."http.query.params".stateCode,
+	stateName: lookup("objectStore-lookup", inboundProperties."http.query.params".stateCode )
+}]]></dw:set-payload>
+        </dw:transform-message>
+        <logger message="RESULTS #[message.payloadAs(java.lang.String)]" level="INFO" doc:name="Logger"/>
+    </flow>
+    <flow name="objectStore-lookup">
+        <logger message="INPUT to ObjectStore #[message.payloadAs(java.lang.String)]" level="INFO" doc:name="Logger"/>
+        <objectstore:retrieve config-ref="ObjectStore__Connector" key="#[payload]" doc:name="Lookup in ObjectStore"/>
+        <logger message="OUTPUT from ObjectStore #[message.payloadAs(java.lang.String)]" level="INFO" doc:name="Logger"/>
+    </flow>
+    <flow name="post:/objectStore/partition/{partitionName}/bulkLoad:objectStore-api-config">
+        <set-payload value="#[message.inboundProperties['http.query.params']]" doc:name="Set Payload"/>
+        <scripting:component doc:name="Read file">
+            <scripting:script engine="Groovy"><![CDATA[return new FileInputStream(new File(payload.fileName));]]></scripting:script>
+        </scripting:component>
+        <dw:transform-message metadata:id="7b2d23d2-db7a-46da-a082-4d78ba8e7835" doc:name="Convert CSV to object">
+            <dw:input-payload doc:sample="stateCodes.csv" mimeType="application/csv"/>
+            <dw:set-payload><![CDATA[%dw 1.0
+%output application/java
+---
+payload]]></dw:set-payload>
+        </dw:transform-message>
+        <foreach doc:name="For Each">
+            <objectstore:store config-ref="ObjectStore__Connector" key="#[payload.abbreviation]" value-ref="#[payload.name]" doc:name="Add to ObjectStore"/>
+        </foreach>
+    </flow>
+    <apikit:mapping-exception-strategy name="objectStore-api-apiKitGlobalExceptionMapping">
+        <apikit:mapping statusCode="404">
+            <apikit:exception value="org.mule.module.apikit.exception.NotFoundException" />
+            <set-property propertyName="Content-Type" value="application/json" doc:name="Property" />
+            <set-payload value="{ &quot;message&quot;: &quot;Resource not found&quot; }" doc:name="Set Payload" />
+        </apikit:mapping>
+        <apikit:mapping statusCode="405">
+            <apikit:exception value="org.mule.module.apikit.exception.MethodNotAllowedException" />
+            <set-property propertyName="Content-Type" value="application/json" doc:name="Property" />
+            <set-payload value="{ &quot;message&quot;: &quot;Method not allowed&quot; }" doc:name="Set Payload" />
+        </apikit:mapping>
+        <apikit:mapping statusCode="415">
+            <apikit:exception value="org.mule.module.apikit.exception.UnsupportedMediaTypeException" />
+            <set-property propertyName="Content-Type" value="application/json" doc:name="Property" />
+            <set-payload value="{ &quot;message&quot;: &quot;Unsupported media type&quot; }" doc:name="Set Payload" />
+        </apikit:mapping>
+        <apikit:mapping statusCode="406">
+            <apikit:exception value="org.mule.module.apikit.exception.NotAcceptableException" />
+            <set-property propertyName="Content-Type" value="application/json" doc:name="Property" />
+            <set-payload value="{ &quot;message&quot;: &quot;Not acceptable&quot; }" doc:name="Set Payload" />
+        </apikit:mapping>
+        <apikit:mapping statusCode="400">
+            <apikit:exception value="org.mule.module.apikit.exception.BadRequestException" />
+            <set-property propertyName="Content-Type" value="application/json" doc:name="Property" />
+            <set-payload value="{ &quot;message&quot;: &quot;Bad request&quot; }" doc:name="Set Payload" />
+        </apikit:mapping>
+    </apikit:mapping-exception-strategy>
+</mule>

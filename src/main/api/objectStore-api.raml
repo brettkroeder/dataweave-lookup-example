@@ -1,0 +1,44 @@
+#%RAML 1.0
+title: Load ObjectStore
+version: 1.0
+#baseUri: http://localhost:8081
+baseUri: https://mocksvc.mulesoft.com/mocks/86d37d39-3399-4acf-968b-a63fe59cf117
+types: 
+  Message: !include types/message.raml
+mediaType: [ applicaiton/json, application/xml]
+/objectStore:
+  /test:
+    get:
+      queryParameters:
+        stateCode:
+          example: "GA"
+          default: "GA"
+      responses:
+        200:
+          body:
+            application/json:
+  /partition:
+    /{partitionName}:
+      uriParameters:
+        partitionName: 
+          required: true
+          example: stateCodes
+      /bulkLoad:
+        post:
+          queryParameters:
+            entryTimeToLive:
+              description: 0 = never expire
+              required: false
+              default: "0"
+            maxEntries:
+              required: false
+            expirationInterval:
+              required: false
+            fileName:
+              required: true
+              example: /junk/stateCodes.csv
+          responses:
+            200:
+              body:
+                  type: Message
+                  example: !include examples/message.raml
